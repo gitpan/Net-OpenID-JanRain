@@ -66,7 +66,7 @@ sub new {
 ########################################################################
 # getExpiresIn
 # if we are expired return 0, otherwise the number of seconds we have left
-sub getExpiresIn {
+sub expiresIn {
 	my $self = shift;
     my $timeleft = $self->{issued} + $self->{lifetime} - time;
     return 0 if $timeleft < 0;
@@ -134,11 +134,11 @@ sub signPairs {
     my $self = shift;
     my ($pairs) = @_;
 
-    die "Association type '$self->{assoc_type}' cannot sign." 
+    carp "Association type '$self->{assoc_type}' cannot sign." 
             unless $self->{assoc_type} eq 'HMAC-SHA1';
 
     my $kv = pairsToKV($pairs);
-    return undef unless $kv;
+    carp "Got no kvform to sign" unless $kv;
  
     return hmacSha1($self->{secret}, $kv);
 }
@@ -150,20 +150,37 @@ sub signPairs {
 # association secret.
 sub signHash {
     my $self = shift;
-    my ($args, $sign_list) = @_;
+    my $args = shift;
+    my $sign_list = shift;
+    my $prefix = shift;
 
-    return toBase64($self->signPairs(hashToPairs($args, $sign_list, "openid.")));
+    return toBase64($self->signPairs(hashToPairs($args, $sign_list, $prefix)));
 }   
 
 sub addSignature {
     my $self = shift;
-    my ($args, $sign_list) = @_;
-    my @list = split /,/, $sign_list;
+    my $args = shift;
+    my $sign_list = shift;
+    my $prefix = shift || '';
     #args must be a hash ref
-    $args->{'openid.signed'} = $sign_list;
-    $args->{'openid.sig'} = $self->signHash($args, \@list);
+    $args->{$prefix.'signed'} = join (',', @$sign_list);
+    $args->{$prefix.'sig'} = $self->signHash($args, $sign_list, $prefix);
     return $args;
 }
 
+sub handle {
+    my $self = shift;
+    return $self->{handle};
+}
+
+sub assoc_type {
+    my $self = shift;
+    return $self->{assoc_type};
+}
+
+sub secret {
+    my $self = shift;
+    return $self->{secret};
+}
 
 1;

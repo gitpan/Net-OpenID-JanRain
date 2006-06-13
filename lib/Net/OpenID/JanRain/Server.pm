@@ -1,1005 +1,1354 @@
-package Net::OpenID::JanRain::Server;
+=head1 OVERVIEW
 
-=head1 Net::OpenID::JanRain::Server
-
-This module documents the interface to the OpenID server library.  The
-only part of the library which has to be used and isn't documented
-here is the store for associations.  See the
-Net::OpenID::JanRain::Stores module and its descendents for store
-documentation.
-
-=head2 OVERVIEW
-
-There are two different classes of requests that identity servers
-need to be able to handle.  First are the requests made directly
-by identity consumers.  Second are the requests made indirectly,
-via redirects sent to the user's web browser.
-
-The first class are the requests made to it directly by identity
-consumers.  These are HTTP POST requests made to the published
-OpenID server URL.  There are two types of these requests, requests
-to create an association, and requests to verify identity requests
-signed with a secret that is entirely private to the server.
-
-The second class are the requests made through redirects.  These
-are HTTP GET requests coming from the user's web browser.  For
-these requests, the identity server must perform several steps.
-It has to determine the identity of the user making the request,
-determine if they are allowed to use the identity requested, and
-then take the correct action depending on the exact form of the
-request and the answers to those questions.
-
-=head2 LIBRARY DESIGN
-
-This server library is designed to make dealing with both classes
-of requests as straightforward as possible.
-
-There are two parts of the library which are
-important.  First, there is the OpenIDServer class in this
-module.  Second, there is the Stores package, which
-contains information on the necessary persistent state mechanisms,
-and several implementations.
-
-=head2 STORES
-
-The OpenID server needs to maintain state between requests in
-order to function.  Its mechanism for doing this is called a
-store.  The store interface is defined in
-Net::OpenID::JanRain::Stores .  Additionally, several
-concrete store implementations are provided, so that most sites
-won't need to implement a custom store.  For a store backed by
-flat files on disk, see Net::OpenID::JanRain::Stores::FileStore .
-For stores based on MySQL or SQLite, see the modules
-Net::OpenID::JanRain::Stores::MySQLStore ,
-Net::OpenID::JanRain::Stores::PostGreSQLStore , and
-Net::OpenID::JanRain::Stores::SQLiteStore .
-
-=head2 USING THIS LIBRARY
-
-This library is designed to be easy to use for handling OpenID
-requests.  There is, however, additional work a site has to do as
-an OpenID server which is beyond the scope of this library.  That
-work consists primarily of creating a couple additional pages for
-handling verifying that the user wants to confirm their identity
-to the consumer site.  Implementing an OpenID server using this
-library should follow this basic plan:
-
-First, you need to choose a URL to be your OpenID server URL.
-This URL needs to be able to handle both GET and POST requests,
-and distinguish between them.
-
-Next, you need to have some system for mapping identity URLs to
-users of your system.  The easiest method to do this is to insert
-an appropriate <link> tag into your users' public pages.  See the
-OpenID spec, http://openid.net/specs.bml#linkrel , for the
-precise format the <link> tag needs to follow.  Then, each user's
-public page URL is that user's identity URL.  There are many
-alternative approaches, most of which should be fairly obvious.
-
-The next step is to write the code to handle requests to the
-server URL.  When a request comes in, several steps need to take
-place:
-
-1. Get an OpenIDServer instance with an appropriate
-store.  This may be a previously created instance, or a new
-one, whichever is convenient for your application.
-
-2. Call the OpenID Server instance's L<"getOpenIDResponse">
-method.  The first argument is a string indicating the HTTP
-method used to make the request.  This should be either
-C<'GET'> or C<'POST'>, the two HTTP methods that OpenID
-uses.  The second argument is the GET or POST (as
-appropriate) arguments provided for this request, as a
-hash reference.  The third argument is a
-callback function for determining if authentication
-requests can proceed.  For more details on the callback
-function, see the the documentation for
-L<"getOpenIDResponse">.
-
-3. The return value from that call is a pair, (status, info).
-Depending on the status value returned, there are several
-different actions you might take.  See the documentation
-for the L<"getOpenIDResponse"> method for a full list
-of possible results, what they mean, and what the
-appropriate action for each is.
-
-Processing all the results from that last step is fairly simple,
-but it involves adding a few additional pages to your site.  There
-needs to be a page about OpenID that users who visit the server
-URL directly can be shown, so they have some idea what the URL is
-for.  It doesn't need to be a fancy page, but there should be one.
-
-Usually the C<DO_AUTH> case will also require at least one
-page, and perhaps more.  These pages could be arranged many
-different ways, depending on your site's policies on interacting
-with its users.
-
-Overall, implementing an OpenID server is a fairly straightforward
-process, but it requires significant application-specific work
-above what this library provides.
-
-=head3 Global Constants
+An OpenID server must perform three tasks:
 
 =over
 
-=item REDIRECT
- 
-This status code is returned by L<"getOpenIDResponse"> when the
-user should be sent a redirect.
+=item 1.
 
+Examine the incoming request to determine its nature and validity.
 
-=item DO_AUTH
- 
-This status code is returned by L<"getOpenIDResponse"> when the
-library has determined that it's up to the application and user to
-fix the reason the library isn't authorized to return a successful
-authentication response.
+=item 2.
 
+Make a decision about how to respond to this request.
 
-=item DO_ABOUT
+=item 3.
 
-This status code is returned by L<"getOpenIDResponse"> when there
-were no OpenID arguments provided at all.  This is typically the
-case when somebody notices the <link> tag in a web page, wonders
-what it's there for, and decides to type it in.  The standard
-behavior in this case is to show a page with a small explanation
-of OpenID.
-
-
-=item REMOTE_OK
- 
-This status code is returned by L<"getOpenIDResponse"> when the
-server should send a 200 response code and an exact message body.
-This is for informing a remote site everything worked correctly.
-
-
-=item REMOTE_ERROR
- 
-This status code is returned by L<"getOpenIDResponse"> when the
-server should send a 400 response code and an exact message body.
-This is for informing a remote site that an error occured while
-processing the request.
-
-
-=item LOCAL_ERROR
- 
-This status code is returned by
-L<"getOpenIDResponse"> when
-something went wrong, and the library isn't able to find an
-appropriate in-protocol response.  When this happens, a short
-plaintext description of the error will be provided.  The server
-will probably want to return some sort of error page here, but its
-contents are not strictly prescribed, like those of the
-REMOTE_ERROR case.
+Format the response according to the protocol.
 
 =back
+
+The first and last of these tasks may performed by
+the L</decodeRequest> and
+L</encodeResponse> methods of the
+Server object.  Who gets to do the intermediate task -- deciding
+how to respond to the request -- will depend on what type of request it
+is.
+
+If it's a request to authenticate a user (a C<checkid_setup> or
+C<checkid_immediate> request), you need to decide if you will assert
+that this user may claim the identity in question.  Exactly how you do
+that is a matter of application policy, but it generally involves making
+sure the user has an account with your system and is logged in, checking
+to see if that identity is hers to claim, and verifying with the user that
+she does consent to releasing that information to the party making the
+request.
+
+Examine the properties of the L</CheckIDRequest> object, and if
+and when you've come to a decision, form a response by calling
+C<</CheckIDRequest->answer>>.
+
+Other types of requests relate to establishing associations between client
+and server and verifying the authenticity of previous communications.
+The Server instance contains all the logic and data necessary to
+respond to
+such requests; just pass it to the L</handleRequest> method.
+
+=head2 OpenID Extensions
+
+Do you want to provide other information for your users
+in addition to authentication?  Version 1.2 of the OpenID
+protocol allows consumers to add extensions to their requests.
+For example, with sites using the L<Simple Registration Extension|http://www.openidenabled.com/openid/simple-registration-extension/>,
+a user can agree to have their nickname and e-mail address sent to a
+site when they sign up.
+
+Since extensions do not change the way OpenID authentication works,
+code to handle extension requests may be completely separate from the
+L</OpenIDRequest> class here.  But you'll likely want data sent back by
+your extension to be signed.  L</OpenIDResponse> provides methods with
+which you can add data to it which can be signed with the other data in
+the OpenID signature.
+
+For example:
+
+    # when request is a checkid_* request
+    response = request.answer(True)
+    # this will a signed 'openid.sreg.timezone' parameter to the response
+    response.addField('sreg', 'timezone', 'America/Los_Angeles')
+
+=head2 Stores
+
+The OpenID server needs to maintain state between requests in order
+to function.  Its mechanism for doing this is called a store.  The
+store interface is defined in L<Net::OpenID::JanRain::Stores>.
+Additionally, several concrete store implementations are provided, so that
+most sites won't need to implement a custom store.  For a store backed
+by flat files on disk, see L<Net::OpenID::JanRain::Stores::FileStore>.
+For stores based on PostGreSQL, MySQL or SQLite, see the 
+L<Net::OpenID::JanRain::Stores::SQLStore|Net::OpenID::JanRain::Stores::SQLStore>
+module.
 
 =cut
 
-use Net::OpenID::JanRain::Util qw( appendArgs 
-                                   hashToKV
-                                   toBase64
-                                   fromBase64
-                                   );
-use Net::OpenID::JanRain::CryptUtil qw( randomString
-                                        numToBytes 
-                                        numToBase64
-                                        base64ToNum 
-                                        DH_MOD
-                                        DH_GEN
-                                        sha1
-                                        );
-use Net::OpenID::JanRain::Association;
-use Crypt::DH;
-use constant {
-    REDIRECT    =>  'redirect',
-    DO_AUTH     =>  'do_auth',
-    DO_ABOUT    =>  'do_about',
-    REMOTE_OK   =>  'exact_ok',
-    REMOTE_ERROR => 'exact_error',
-    LOCAL_ERROR =>  'local_error',
-    _signed_fields => 'mode,identity,return_to',
-    SECRET_LIFETIME => 14 * 24 * 60 * 60 # A fortnight of seconds
-};
+package Net::OpenID::JanRain::Server::Request;
 
-# variable accessors
-foreach my $var (qw(store url normal_key dumb_key)) {
-    no strict 'refs';
-    my $class = 'Net::OpenID::JanRain::Server';
-    *{"${class}::$var"} = 
-        sub {
-            my $self = shift;
-            croak('not a hash') unless(UNIVERSAL::isa($self, 'HASH'));
-            return($self->{$var});
-        };
+use strict;
+use warnings;
+use Carp;
+
+=head1 Net::OpenID::JanRain::Server::Request
+
+The parent class for several types of requests.  None of these classes
+are to be instantiated by the user, but this class will never
+be encountered except as a parent.
+
+=head2 Method
+
+=head3 mode
+
+Returns the C<openid.mode> parameter of this request.
+
+=cut
+
+my $errorClass = 'Net::OpenID::JanRain::Server::ProtocolError';
+
+sub mode {
+    my $self = shift;
+    return $self->{mode};
 }
 
-=head2 Net::OpenID::JanRain::Server class
+package Net::OpenID::JanRain::Server::CheckAuthRequest;
+our @ISA = qw( Net::OpenID::JanRain::Server::Request );
+use Carp;
+use strict;
+use warnings;
 
-This class is the interface to the OpenID server logic.  Instances
-contain no per-request state, so a single instance can be reused
-(or even used concurrently by multiple threads) as needed.
+use Net::OpenID::JanRain::Util qw( hashToPairs );
 
-=head2 High Level Methods
+use constant {
+    OPENID_PREFIX  =>  'openid.',
+};
 
-An extremely high-level interface is provided via the
-C<getOpenIDResponse> method.  Implementations that wish to handle
-dispatching themselves can use the low level methods described
-in the next section.
+=head2 Net::OpenID::JanRain::Server::CheckAuthRequest
 
-=head3 new
+A request object for C<openid.mode=check_authentication>.
+This request is best handled by the L</handleRequest> method of
+the L</Net::OpenID::JanRain::Server> object.
 
-This method initializes a new OpenID Server instance.
-OpenID Server instance contain no per-request internal
-state, so they can be reused or used concurrently by multiple
-threads, if desired.
-
-
-=head4 Arguments
-
-=over
-
-=item server_url
-
-This is the server's OpenID URL.  It is
-used whenever the server needs to generate a URL that will
-cause another OpenID request to be made, which can happen
-in authentication requests.  It's also used as part of the
-key for looking up and storing the server's secrets.
-
-=item store
-
-This in an object implementing the
-Net::OpenID::JanRain::Stores interface which
-the library will use for persistent storage.  See the
-Net::OpenID::JanRain::Stores
-documentation for more information on stores and various
-implementations.  Note that the store used for the server
-must not be a dumb-style store.  It's not possible to be a
-functional OpenID server without persistent storage.
-
-=back
+However, it does possess an C<answer> method which takes a 
+L</Net::OpenID::JanRain::Server::Signatory> object.
 
 =cut
 
 sub new {
-    my $caller = shift;
-    my ($server_url, $store) = @_;
+    my ($caller, $assoc_handle, $sig, $signed) = @_;
+    my $invalidate_handle = shift;
+
     my $class = ref($caller) || $caller;
-    die "Cannot instantiate OpenID server without a store" unless $store;
-    die "OpenID servers cannot use a dumb store" if $store->isDumb;
-  
+
     my $self = {
-        url => $server_url,
-        normal_key => $server_url . '|normal',
-        dumb_key => $server_url . '|dumb',
-        store => $store,
+      mode              => 'check_authentication',
+      assoc_handle      => $assoc_handle,
+      sig               => $sig,
+      signed            => $signed,
+      invalidate_handle => $invalidate_handle,
     };
 
-    bless($self,$class);
+    bless($self, $class);
 }
 
-=head3 getOpenIDResponse
+sub fromQuery {
+    my ($caller, $query) = @_;
 
-This method processes an OpenID request, and determines the
-proper response to it.  It then communicates what that
-response should be back to its caller via return codes.
+    my $assoc_handle = $query->{OPENID_PREFIX . 'assoc_handle'};
+    my $sig = $query->{OPENID_PREFIX . 'sig'};
+    my $signed_list = $query->{OPENID_PREFIX . 'signed'};
+    my $invalidate_handle = $query->{OPENID_PREFIX . 'invalidate_handle'};
+
+    unless (defined($assoc_handle) and 
+            defined($sig) and 
+            defined($signed_list)) {
+        return $errorClass->new($query, "check_authentication request missing required parameters.");
+    }
+    
+    my @signed_list = split ',', $signed_list;
+    my %vq = %$query;
+    $vq{OPENID_PREFIX . 'mode'} = 'id_res';
+
+    my $signed_pairs = hashToPairs(\%vq, \@signed_list, OPENID_PREFIX);
+    return $errorClass->new($query, "Query missing arg in signed list") unless $signed_pairs;
+    
+    my $self = {
+                mode => 'check_authentication',
+                assoc_handle => $assoc_handle,
+                signed => $signed_pairs,
+                sig => $sig,
+                invalidate_handle => $invalidate_handle,
+                };
+
+    bless($self);
+}
+
+sub answer {
+    my ($self, $signatory) = @_;
+
+    my $is_valid = $signatory->verify($self->{assoc_handle}, $self->{sig}, $self->{signed});
+
+    $signatory->invalidate($self->{assoc_handle}, 1);
+    my $response = Net::OpenID::JanRain::Server::Response->new($self);
+    $response->addFields('',{'is_valid' => (($is_valid and "true") or "false")});
+
+    if ($self->{invalidate_handle}) {
+        my $assoc = $signatory->getAssociation($self->{invalidate_handle}, 0);
+        $response->addFields('',{'invalidate_handle' => $self->{invalidate_handle}}) unless $assoc;
+    }
+    return $response;
+}
 
 
-=head4 Arguments
+package Net::OpenID::JanRain::Server::AssociateRequest;
+our @ISA = qw( Net::OpenID::JanRain::Server::Request );
 
-=over
+use strict;
+use warnings;
+use Carp;
+use Crypt::DH;
+use Net::OpenID::JanRain::Util qw( toBase64 fromBase64 );
+use Net::OpenID::JanRain::CryptUtil qw( base64ToNum
+                                        numToBase64 
+                                        numToBytes
+                                        sha1
+                                        DEFAULT_DH_MOD 
+                                        DEFAULT_DH_GEN );
 
-=item $http_method
+use constant {
+    OPENID_PREFIX  =>  'openid.',
+};
 
-This is a string describing the HTTP
-method used to make the current request.  The only
-expected values are 'GET' and 'POST', though
-capitalization will be ignored.  Any value other than one
-of the expected ones will result in a LOCAL_ERROR return
-code.
+=head2 Net::OpenID::JanRain::Server::AssociateRequest
 
-=item $args
+A request object for C<openid.mode=associate>.
+This request is best handled by the L</handleRequest> method of
+the L</Net::OpenID::JanRain::Server> object.
 
-This should be a hash reference that
-contains the parsed, unescaped arguments that were sent
-with the OpenID request being handled. 
-
-=item $is_authorized
-
-This is a callback function which this
-OpenIDServer instance will use to determine the
-result of an authentication request.  The function will be
-called with two string arguments, identity_url and
-trust_root.  It should return a boolean value
-indicating whether this identity request is authorized to
-succeed.
-
-The function needs to perform two seperate tasks, and
-return True only if it gets a positive result from
-each.
-
-The first task is to determine the user making this
-request, and if they are authorized to claim the identity
-URL passed to the function.  If the user making this
-request isn't authorized to claim the identity URL, the
-callback should return False.
-
-The second task is to determine if the user will allow the
-trust root in question to determine his or her identity.
-If they have not previously authorized the trust root to
-know they're identity the callback should return False.
-
-This callback should work only with
-information already submitted, ie. the user already logged
-in and the trust roots they've already approved.  It is
-important that this callback does not attempt to interact
-with the user.  Doing so would lead to violating the
-OpenID specification when the server is handling
-checkid_immediate requests.
-
-=back
-
-=head4 Return Codes
-
-The return value of this method is a pair, (status, info).
-The first value is the status code describing what action
-should be taken.  The second value is additional information
-for taking that action.
-
-=over
-
-=item REDIRECT
-
-This code indicates that the server
-should respond with an HTTP redirect.  In this case,
-info is the URL to redirect the client to.
-
-=item DO_AUTH
-
-This code indicates that the server
-should take whatever actions are necessary to allow
-this authentication to succeed or be cancelled, then
-try again.  In this case info is a
-AuthorizationInfo object, which contains additional
-useful information.
-
-=item DO_ABOUT
-
-This code indicates that the server
-should display a page containing information about
-OpenID.  This is returned when it appears that a user
-entered an OpenID server URL directly in their
-browser, and the request wasn't an OpenID request at
-all.  In this case info is not defined.
-
-=item REMOTE_OK
-
-This code indicates that the server
-should return content verbatim in response to this
-request, with an HTTP status code of 200.  In this
-case, info is a string containing the content to
-return.
-
-=item REMOTE_ERROR
-
-This code indicates that the
-server should return content verbatim in response to
-this request, with an HTTP status code of 400.  In
-this case, info is a string containing the content
-to return.
-
-=item LOCAL_ERROR
-
-This code indicates an error that
-can't be handled within the protocol.  When this
-happens, the server may inform the user that an error
-has occured as it sees fit.  In this case, C{info} is
-a short description of the error.
-
-=back
+However, it does possess an C<answer> method which takes an
+L<Net::OpenID::JanRain::Association|Net::OpenID::JanRain::Association>
+object.  It also has accessor methods C<assoc_type> and C<session_type>.
 
 =cut
 
-sub getOpenIDResponse {
-    my $self = shift;
-    my ($http_method, $args, $is_authorized) = @_;
+
+sub new {
+    my ($caller, $session_type, $pubkey);
+
+    my $class = ref($caller) || $caller;
     
-    if (lc($http_method) eq 'get') {
-        my $trust_root = ($args->{'openid.trust_root'} or
-                         $args->{'openid.return_to'});
-        my $id_url = $args->{'openid.identity'};
-        my $authorized = 0;
-        if($trust_root and $id_url) {
-            $authorized = &{$is_authorized}($id_url, $trust_root);
-        }
-        return $self->getAuthResponse($authorized, $args);
-    }
-    elsif (lc($http_method) eq 'post') {
-        my $mode = $args->{'openid.mode'};
-        return $self->associate($args) if $mode eq 'associate';
-        return $self->checkAuthentication($args) 
-            if $mode eq 'check_authentication';
-        return $self->postError("Invalid openid.mode ($mode) for POST request");
+    my $self;
+    if ($session_type eq 'DH-SHA1') {
+        $self = {
+            mode            => 'associate',
+            session_type    => $session_type,
+            pubkey          => $pubkey,
+            dh              => Crypt::DH->new(p => DEFAULT_DH_MOD,
+                                              g => DEFAULT_DH_GEN ),
+        };
     }
     else {
-        return (LOCAL_ERROR, 
-                "HTTP method $http_method is not valid for OpenID");
+        $self = {
+            session_type    => $session_type,
+        }
     }
+    bless($self, $class);
 }
 
-=head2 Low level methods
+sub fromQuery {
+    my ($caller, $query) = @_;
+    my $class = ref($caller) || $caller;
 
-These methods are provided in case you must do your own dispatching for some
-reason.  It is recommended that you use L<"getOpenIDResponse"> unless you have a
-particular reason not to.  However, if you must do 
-dispatching yourself, these methods are here to allow you to do so.
 
-=head3 getAuthResponse
+    my $assoc_type = $query->{OPENID_PREFIX . 'assoc_type'} || 'HMAC-SHA1';
 
-This method determines the correct response to make to an
-authentication request.
-
-This method always returns a pair.  The first value of the
-pair indicates what action the server should take to respond
-to this request.  The second value is additional information
-to use when taking that action. (see L<"getOpenIDResponse"> for
-how to handle these codes)
-
-=head4 Arguments
-
-=over
-
-=item $authorized
-
-This is a value which indicates whether the
-server is authorized to tell the consumer that the user
-owns the identity URL in question.  For this to be true,
-the server must check that the user making this request is
-the owner of the identity URL in question, and that the
-user has given the consumer permission to learn his or her
-identity.  The server must determine this value based on
-information it already has, without interacting with the
-user.  If it has insufficient information to produce a
-definite affirmative, it must pass in a false value.
-
-=item $args
-
-This should be a hash reference that
-contains the parsed, unescaped query arguments that were
-sent with the OpenID request being handled.  
-
-=back
-
-=cut
-
-sub getAuthResponse {
-    my $self = shift;
-    my ($authorized, $args) = @_;
-
-    my $mode = $args->{'openid.mode'};
-
-    return $self->getError($args, "Invalid openid.mode ($mode) for GET request")
-        unless ($mode and 
-            ($mode eq 'checkid_immediate' or $mode eq 'checkid_setup')); 
-    
-    my $identity = $args->{'openid.identity'} 
-        or return $self->getError($args, 'No identity specified');
-
-    my ($return_to, $error) = $self->_checkTrustRoot($args);
-    return $self->getError($args, $error) if $error;
-
-    unless ($authorized) {
-        if ($mode eq 'checkid_immediate') {
-            my %nargs = %$args; # deep copy
-            $nargs{'openid.mode'} = 'checkid_setup';
-            my $setup_url = appendArgs($self->url, \%nargs);
-            my $rargs = {'openid.mode' => 'id_res', 
-                         'openid.user_setup_url' => $setup_url};
-            return REDIRECT, appendArgs($return_to, $rargs);
-        }
-        elsif ($mode eq 'checkid_setup') {
-            return DO_AUTH, Net::OpenID::JanRain::Server::AuthorizationInfo->new($self->url, $args);
-        }
-        else {
-            die "Unreachable";
-        }
+    unless ($assoc_type eq 'HMAC-SHA1') {
+        return $errorClass->new($query, "Unknown association type '$assoc_type'");
     }
     
-    $reply = {
-        'openid.mode' => 'id_res',
-        'openid.return_to' => $return_to,
-        'openid.identity' => $identity
-        };
+    my $session_type = $query->{OPENID_PREFIX . 'session_type'};
 
-    my $store = $self->store;
-    my $assoc_handle = $args->{'openid.assoc_handle'};
-    my $assoc;
-    if ($assoc_handle) {
-        $assoc = $store->getAssociation($self->{normal_key}, $assoc_handle);
-
-        # fall back to dumb mode if assoc_handle not found,
-        # and send the consumer an invalidate_handle message
-        if ((not $assoc) or $assoc->getExpiresIn <= 0) {
-            $store->removeAssociation($self->{normal_key}, $assoc->{handle})
-                if ($assoc); # remove expired association
-            $assoc = $self->createAssociation('HMAC-SHA1');
-            $store->storeAssociation($self->{dumb_key}, $assoc);
-            $reply->{'openid.invalidate_handle'}=$assoc_handle;
+    my $self = {};
+    unless ($session_type) {
+        $session_type = 'plaintext';
+    }
+    if ($session_type eq 'DH-SHA1') {
+        my $raw_cpub = $query->{OPENID_PREFIX . 'dh_consumer_public'};
+        unless ($raw_cpub) {
+            return $errorClass->new($query, 
+                    'DH-SHA1 associate request has no public key');
         }
-    }
-    else {
-        $assoc = $self->createAssociation('HMAC-SHA1');
-        $store->storeAssociation($self->{dumb_key}, $assoc);
-    }
+        my $cpub = base64ToNum($raw_cpub); 
+        unless (defined($cpub)) {
+            return $errorClass->new($query, 
+                    'DH public key improperly encoded');
+        }        
 
-    $reply->{'openid.assoc_handle'} = $assoc->{handle};
-
-    $assoc->addSignature($reply, _signed_fields);
-
-    my $url = appendArgs($return_to, $reply);
-    return REDIRECT, $url;
-}
-
-=head3 associate
-
-This method performs the openid.mode=associate
-action.  Pass in the query arguments recieved as a hash ref, and
-expect back a (status, info) pair.  Only the codes REMOTE_OK
-and REMOTE_ERROR are returned from this method.
-
-=cut
-
-sub associate {
-    my $self = shift;
-    my ($args) = @_;
-
-    my $assoc_type = ($args->{'openid.assoc_type'} or 'HMAC-SHA1');
-    my $assoc = $self->createAssociation($assoc_type) or return
-       $self->postError('unable to create an association for type $assoc_type');
-    $self->store->storeAssociation($self->{normal_key}, $assoc);
-
-    my $reply = {
-        'assoc_type' => 'HMAC-SHA1',
-        'assoc_handle' => $assoc->{handle},
-        'expires_in' => $assoc->getExpiresIn
-        };
-
-    my $session_type = $args->{'openid.session_type'};
-    if($session_type) {
-        return $self->postError('session_type must be DH-SHA1')
-            unless ($session_type eq 'DH-SHA1');
-            
-        my ($modulus, $generator);
-        if (defined($args->{'openid.dh_modulus'})) {
-            $modulus = base64ToNum($args->{'openid.dh_modulus'});
-        } else {
-            $modulus = DH_MOD;
-        }
-        if (defined($args->{'openid.dh_gen'})) {
-            $generator = base64ToNum($args->{'openid.dh_gen'});
-        } else {
-            $generator = DH_GEN;
-        }
-        # Note: our twos complement decoder returns undef if the sign
-        # bit is set, since negative numbers are invalid for us here
-        return $self->postError("DH modulus and generator not positive integers")
-            unless (defined($modulus) and defined($generator));
-            
-        return $self->postError('Missing openid.dh_consumer_public')
-            unless defined($args->{'openid.dh_consumer_public'});
-        my $consumer_public = $args->{'openid.dh_consumer_public'};
-        my $cpub = base64ToNum($consumer_public)
-            or $self->postError("DH public key must be positive integer");
-        
-        my $dh = Crypt::DH->new;
-        $dh->p($modulus);
-        $dh->g($generator);
-        $dh->generate_keys;
-        my $dh_secret = $dh->compute_secret($cpub);
-        my $mac_key = $assoc->{secret} ^ sha1(numToBytes($dh_secret));
-
-        $reply->{'session_type'} = $session_type;
-        $reply->{'dh_server_public'} = numToBase64($dh->pub_key);
-        $reply->{'enc_mac_key'} = toBase64($mac_key);
-    }
-    else { # no $session_type; plaintext secret transmission
-        $reply->{'mac_key'} = $assoc->{secret};
-    }
-
-    return REMOTE_OK, hashToKV($reply);
-}
-
-=head3 checkAuthentication
-
-This method performs the openid.mode=check_authentication
-action.  Pass in the query arguments recieved as a hash ref, and
-expect back a (status, info) pair.  Only the codes REMOTE_OK
-and REMOTE_ERROR are returned from this method.
-
-=cut
-
-sub checkAuthentication {
-    my $self = shift;
-    my ($args) = @_;
-    
-    my $assoc_handle = $args->{'openid.assoc_handle'}
-        or return $self->postError('Missing openid.assoc_handle');
-
-    my $assoc = $self->store->getAssociation($self->{dumb_key}, $assoc_handle);
-
-    my $reply = {};
-
-    if ($assoc and $assoc->getExpiresIn > 0) {
-        my $signed = $args->{'openid.signed'}
-            or return $self->postError('Missing openid.signed');
-        my $sig = $args->{'openid.sig'}
-            or return $self->postError('Missing openid.sig');
-        
-        my %to_verify = %$args; 
-        $to_verify{'openid.mode'} = 'id_res';
-        my @signed_fields = split /,/, $signed; # XXX strip
-        my $tv_sig = $assoc->signHash(\%to_verify, \@signed_fields);
-
-        if ($tv_sig eq $sig) {
-            $self->store->removeAssociation($self->{dumb_key}, $assoc_handle);
-            $reply->{is_valid} = 'true';
-
-            if (my $invalidate_handle = $args->{'openid.invalidate_handle'} and
-                not $self->store->getAssociation($self->{normal_key},
-                                                    $invalidate_handle)) {
-                $reply->{invalidate_handle} = $invalidate_handle;
+        my $dh_modulus = $query->{OPENID_PREFIX . 'dh_modulus'};
+        if (defined($dh_modulus)) {
+            $dh_modulus = base64ToNum($dh_modulus);
+            unless (defined($dh_modulus)) {
+                 return $errorClass->new($query, 
+                    'DH modulus improperly encoded');           
             }
         }
         else {
-            $reply->{is_valid} = 'false';
+            $dh_modulus = DEFAULT_DH_MOD;
         }
-    }
-    else {
-        $self->store->removeAssociation($self->{dumb_key}, $assoc_handle)
-            if $assoc;
-        $reply->{is_valid} = 'false';
-    }
-    return REMOTE_OK, hashToKV($reply);
-}
-
-=head3 createAssociation
-
-This method is used internally by the OpenID library to create
-new associations to send to consumers.
-
-=head4 Argument
-
-=over
-
-=item $assoc_type
-
-The type of association to request.  Only C<'HMAC-SHA1'> is currently supported.
-
-=back
-
-=cut
-
-sub createAssociation {
-    my $self = shift;
-    my ($assoc_type) = @_;
-
-    return undef unless $assoc_type eq 'HMAC-SHA1';
-
-    my $secret = randomString(20);
-    my $uniq = toBase64(randomString(4));
-    my $time = time;
-    my $handle = "($assoc_type)($time)($uniq)";
-
-    return Net::OpenID::JanRain::Association->fromExpiresIn(
-        SECRET_LIFETIME, $handle, $secret, $assoc_type);
-}
-
-=head3 getError
-
-This method is used to generate a correct error response
-if an error occurs during a GET request.  It can return
-REDIRECT, LOCAL_ERROR and DO_ABOUT codes.
+        my $dh_gen = $query->{OPENID_PREFIX . 'dh_gen'};
+        if (defined($dh_gen)) {
+            $dh_gen = base64ToNum($dh_gen);
+            unless (defined($dh_gen)) {
+                 return $errorClass->new($query, 
+                    'DH gen improperly encoded');           
+            }
+        }
+        else {
+            $dh_gen = DEFAULT_DH_GEN;
+        }
         
-=head4 Argument
-
-=over
-
-=item $args
-
-The query arguments as a hash ref.
-
-=item $msg
-
-An error message to send.
-
-=back
-
-=cut
-
-
-sub getError {
-    my $self = shift;
-    my ($args, $msg) = @_;
-
-    my $return_to = $args->{'openid.return_to'};
-
-    if($return_to) {
-        my $err = {
-            'openid.mode' => 'error',
-            'openid.error' => $msg
-            };
-        return REDIRECT, appendArgs($return_to, $err);
+        $self = {
+            mode         => 'associate',
+            session_type => 'DH-SHA1',
+            assoc_type   => $assoc_type,
+            pubkey       => $cpub,
+            dh           => Crypt::DH->new(g => $dh_gen, p => $dh_modulus),
+        };
+    }
+    elsif ($session_type eq 'plaintext') {
+        $self = {
+            mode         => 'associate',
+            session_type => 'plaintext',
+            assoc_type   => $assoc_type,
+        }
     }
     else {
-        for (keys(%$args)) {
-            return LOCAL_ERROR, $msg if /^openid/;
-        }
-        return DO_ABOUT, undef;
+        return $errorClass->new($query, "Unknown session type '$session_type'");
     }
+    bless($self, $class);
 }
 
-=head3 postError
+sub answer {
+    my ($self, $assoc) = @_;
+    
+    my $response = Net::OpenID::JanRain::Server::Response->new($self);
 
-Generates the correct error response if an error occurs during a POST request.
-Returns the C<REMOTE_ERROR> code.
+    $response->addFields('',{
+        assoc_handle    => $assoc->handle,
+        expires_in      => $assoc->expiresIn(),
+        assoc_type      => 'HMAC-SHA1',
+        });
+    if ($self->session_type eq 'DH-SHA1') {
+        my $dh = $self->{dh};
+        $dh->generate_keys;
+        my $dh_secret = $dh->compute_secret($self->{pubkey});
+        my $enc_mac_key = $assoc->{secret} ^ sha1(numToBytes($dh_secret));
+        my $spub = $dh->pub_key;
+        $response->addFields('',{
+            session_type        => $self->session_type,
+            dh_server_public    => numToBase64($spub),
+            enc_mac_key         => toBase64($enc_mac_key),
+            });
+    }
+    elsif ($self->session_type eq 'plaintext') {
+        $response->addFields('',{mac_key => toBase64($assoc->secret)});
+    }
+    else {
+    # XXX - kablooie
+    }
+    return $response;
+}
 
-=head4 Argument
+sub session_type {
+    my $self = shift;
+    return $self->{session_type};
+}
+
+sub assoc_type {
+    my $self = shift;
+    return $self->{assoc_type};
+}
+
+package Net::OpenID::JanRain::Server::CheckIDRequest;
+our @ISA = qw( Net::OpenID::JanRain::Server::Request );
+
+use strict;
+use warnings;
+use URI;
+
+use constant {
+    OPENID_PREFIX  =>  'openid.',
+};
+
+=head2 Net::OpenID::JanRain::Server::CheckIDRequest
+
+This object represents requests where C<openid.mode=checkid_setup> or
+C<openid.mode=checkid_immediate>.  It is returned by the L</decodeRequest>
+method of L<Net::OpenID::JanRain::Server>.
+
+=head3 Methods
+
+=cut
+
+sub new {
+    my ($caller, $identity, $return_to, $optional) = @_;
+    my $trust_root = $optional->{trust_root};
+    my $immediate = $optional->{immediate};
+    my $assoc_handle = $optional->{assoc_handle};
+    my $class = ref($caller) || $caller;
+
+    my $self = {
+        assoc_handle => $assoc_handle,
+        identity     => $identity,
+        return_to    => $return_to,
+        trust_root   => $trust_root || $return_to,
+    };
+    if ($immediate) {
+        $self->{immediate} = 1;
+        $self->{mode} = 'checkid_immediate';
+    }
+    else {
+        $self->{immediate} = 0;
+        $self->{mode} = 'checkid_setup';
+    }
+
+    my ($tr_valid, $message) = 
+            checkTrustRoot($self->{trust_root}, $self->{return_to});
+    unless ($tr_valid) {
+        carp $message;
+        return undef;
+    }
+
+    bless($self, $class);
+}
+
+sub fromQuery {
+    my ($caller, $query) = @_;
+    my $class = ref($caller) || $caller;
+
+    my $mode = $query->{OPENID_PREFIX.'mode'};
+    my $self;
+    if ($mode eq "checkid_immediate") {
+        $self = {
+            immediate   => 1,
+            mode        => 'checkid_immediate',
+            trust_root  => $query->{OPENID_PREFIX.'trust_root'} 
+                            || $query->{OPENID_PREFIX.'return_to'},
+            assoc_handle=> $query->{OPENID_PREFIX.'assoc_handle'},
+        };
+    }
+    else {
+        $self = {
+            immediate   => 0,
+            mode        => 'checkid_setup',
+            trust_root  => $query->{OPENID_PREFIX.'trust_root'}
+                            || $query->{OPENID_PREFIX.'return_to'},
+            assoc_handle=> $query->{OPENID_PREFIX.'assoc_handle'},
+        };
+    }
+    my @required = ('identity', 'return_to'); 
+
+    for my $field (@required) {
+        my $value = $query->{OPENID_PREFIX.$field};
+        unless ($value) {
+            return $errorClass->new($query, "$field is a required field for a $mode request");
+        }
+        $self->{$field} = $value;
+    }
+
+    my ($tr_valid, $message) = 
+            checkTrustRoot($self->{trust_root}, $self->{return_to});
+    return $errorClass->new($query, $message) unless $tr_valid;
+
+    bless($self, $class);
+}
+
+=head4 answer
+
+ $response = $request->answer($allow, $server_url);
 
 =over
 
-=item $msg
+=item $allow
 
-The error message to send.
+A boolean value: if true, sends an C<id_res> response.  If false,
+sends a C<cancel> response if the request is not immediate, and
+C<setup_needed> if it is immediate.
+
+=item $server_url
+
+This argument is required if the request is immediate, and should be the
+URL of the server endpoint, used to construct the setup URL.
 
 =back
 
 =cut
 
-sub postError {
+sub answer {
     my $self = shift;
-    my ($msg) = @_;
-
-    return REMOTE_ERROR, "error:$msg\n";
+    my $allow = shift;
+    my $server_url = shift;
+    
+    my $response = Net::OpenID::JanRain::Server::Response->new($self);
+    
+    if($allow) {
+        $response->addFields('',{
+            mode        => 'id_res',
+            identity    => $self->identity,
+            return_to   => $self->return_to,
+            }, 1);
+    }
+    else {
+        if ($self->immediate) {
+            croak('server_url is required for allow=false in immediate mode')
+                unless $server_url;
+            # Make a new request just like me, but with immediate=False.
+            my $setup_request = Net::OpenID::JanRain::Server::CheckIDRequest->new(
+                    $self->identity, $self->return_to, $self->trust_root,
+                    0, $self->assoc_handle);
+            my $setup_url = $setup_request->encodeToURL($server_url);
+            $response->addFields('',{ mode           => 'id_res',
+                                      user_setup_url => $setup_url
+                                    }, 0); # unsigned
+        }
+        else {
+            $response->addFields('',{mode => 'cancel'},0); # unsigned
+        }
+    }
+    return $response;
 }
 
-sub _checkTrustRoot {
-    my $self = shift;
-    my ($args) = @_;
+=head3 encodeToURL
 
-    my $return_to = $args->{'openid.return_to'};
-    return undef, "No return_to URL specified" unless $return_to;
-    my $trust_root = $args->{'openid.trust_root'};
-    return $return_to, undef unless $trust_root;
+Takes the server endpoint URL and returns a URL which would generate this
+request.
+
+=cut
+
+sub encodeToURL {
+    my ($self, $server_url) = @_;
+    
+    my $q = {
+        OPENID_PREFIX.'mode'        => $self->mode,
+        OPENID_PREFIX.'identity'    => $self->identity,
+        OPENID_PREFIX.'return_to'   => $self->return_to
+        };
+    $q->{OPENID_PREFIX.'trust_root'} = $self->trust_root if $self->trust_root;
+    $q->{OPENID_PREFIX.'assoc_handle'} = $self->assoc_handle if $self->assoc_handle;
+    
+    return appendArgs($server_url, $q);
+}
+
+=head3 getCancelURL
+
+Returns a URL to redirect the user to send a cancel message to the consumer.
+Calling this method will cause croakage if the request is in immediate mode.
+
+=cut
+
+sub getCancelURL {
+    my $self = shift;
+
+    croak('Cancel is not an appropriate response to an immediate mode request') if $self->immediate;
+
+    return appendArgs($self->return_to, {OPENID_PREFIX.'mode'=>'cancel'});
+}
+
+=head3 checkTrustRoot
+
+ $is_return_to_valid_against_trust_root = checkTrustRoot($trust_root, $return_to);
+
+=cut
+
+# in Util now, maybe should be removed?
+sub checkTrustRoot {
+    my ($trust_root, $return_to) = @_;
 
     my $rt = URI->new($return_to);
     my $tr = URI->new($trust_root);
     
-    return undef, "return_to URL invalid against trust_root: scheme"
+    return 0, "return_to URL invalid against trust_root: scheme"
         unless $rt->scheme eq $tr->scheme;
 
     # Check the host
     my $trh = $tr->host;
     if($trh =~ s/^\*\.//) { # wildcard trust root
-        return undef, "return_to URL invalid against trust_root: wchost"
+        return 0, "return_to URL invalid against trust_root: wchost"
             unless ($rt->host =~ /\w*\.?$trh/ and $rt->port == $tr->port);
     }
     else { # no wildcard
-        return undef, "return_to URL invalid against trust_root: host"
+        return 0, "return_to URL invalid against trust_root: host"
             unless $tr->host_port eq $rt->host_port;
     }
     
     # Check the path and query
     my $trp = $tr->path_query;
-    return undef, "return_to URL invalid against trust_root: path"
+    return 0, "return_to URL invalid against trust_root: path"
         unless $rt->path_query =~ /^$trp/;
 
     # success
-    return $return_to, undef;
+    return 1, "return_to URL valid against trust_root";
 }
 
-1;
+=head3 Accessor Methods
 
-package Net::OpenID::JanRain::Server::AuthorizationInfo;
+=over
 
-=head2 The AuthorizationInfo Object
+=item C<trust_root>
 
-This is a class to encapsulate information that is useful when
-interacting with a user to determine if an authentication request
-can be authorized to succeed.  This class provides methods to get
-the identity URL and trust root from the request that failed.
-Given those, the server can determine what needs to happen in
-order to allow the request to proceed, and can ask the user to
-perform the necessary actions.
+=item C<identity>
 
-The user may choose to either perform the actions or not.  If they
-do, the server should try to perform the request OpenID request
-again.  If they choose not to, and inform the server by hitting
-some form of cancel button, the server should redirect them back
-to the consumer with a notification of that for the consumer.
+=item C<return_to>
 
-This class provides two approaches for each of those actions.  The
-server can either send the user redirects which will cause the
-user to retry the OpenID request, or it can help perform those
-actions without involving an extra redirect, producing output that
-works like that of C<Net::OpenID::JanRain::Server::getOpenIDResponse>.
+=item C<immediate>
 
-Both approaches work equally well, and you should choose the one
-that fits into your framework better.
+=item C<assoc_handle>
 
-The C<retry> and C<cancel> methods produce C<(status,
-info)> pairs that should be handled exactly like the responses
-from C<Net::OpenID::JanRain::Server::getOpenIDResponse>.
-
-The C<retryURL> and C<cancelURL> methods return URLs
-to which the user can be redirected to automatically retry or
-cancel this OpenID request.
+=back
 
 =cut
 
-use Net::OpenID::JanRain::Util qw( appendArgs 
-                                   hashToKV
-                                   urlencode
-                                   decodeParams
-                                   toBase64
-                                   fromBase64
-                                   );
+sub trust_root {
+    my $self = shift;
+    return $self->{trust_root};
+}
+
+sub return_to {
+    my $self = shift;
+    return $self->{return_to};
+}
+
+sub identity {
+    my $self = shift;
+    return $self->{identity};
+}
+
+sub immediate {
+    my $self = shift;
+    return $self->{immediate};
+}
+
+sub assoc_handle {
+    my $self = shift;
+    return $self->{assoc_handle};
+}
+
+package Net::OpenID::JanRain::Server::Response;
+
+use strict;
+use warnings;
+
+use Net::OpenID::JanRain::Util qw( hashToKV );
+
 use constant {
-    REDIRECT    =>  'redirect',
-    DO_AUTH     =>  'do_auth',
-    DO_ABOUT    =>  'do_about',
-    REMOTE_OK   =>  'exact_ok',
-    REMOTE_ERROR => 'exact_error',
-    LOCAL_ERROR =>  'local_error',
+    OPENID_PREFIX  =>  'openid.',
 };
 
-=head3 new
+use Net::OpenID::JanRain::Util qw( appendArgs );
 
-The constructor used by the library.  It takes the base server url as a string
-for the first argument and a hash ref of the query params as the second argument.
+=head1 Net::OpenID::JanRain::Server::Response
+
+This object is returned by the C<answer> methods of
+L</Net::OpenID::JanRain::Server::Request> objects.
+
+=head2 Methods
+
+=cut
+
+sub new {
+    my ($caller, $request) = @_;
+    
+    my $class = ref($caller) || $caller;
+    
+    my $self = {
+        request => $request,
+        fields => {},
+        };
+
+    bless($self, $class);
+}
+
+=head3 whichEncoding
+
+Returns 'url' if the response should be returned in a redirect URL,
+and 'kvform' if the response should be returned as a plaintext KV form
+response.
+
+=cut
+
+sub whichEncoding {
+    my $self = shift;
+    if($self->request->mode eq 'checkid_immediate' or $self->request->mode eq 'checkid_setup') {
+        return 'url';
+    }
+    else {
+        return 'kvform';
+    }
+}
+
+=head3 signed
+
+Returns a boolean value indicating whether the response should be signed.
+
+=cut
+
+sub signed {
+    my $self = shift;
+
+    return $self->{signed};
+}
+
+=head3 encodeToURL
+
+Returns a URL for redirecting the user to send the response.
+
+=cut
+
+sub encodeToURL {
+    my $self = shift;
+    my $fields = {};
+    while (my ($key, $value) = each %{$self->{fields}}) {
+        my $gnocchi = OPENID_PREFIX.$key;
+        $fields->{$gnocchi} = $value;
+    }
+    return appendArgs($self->request->return_to, $fields);
+}
+
+=head3 encodeToKVForm
+
+Returns a KV form string to put in the body of the HTTP response.
+
+=cut
+
+sub encodeToKVForm {
+    my $self = shift;
+    return hashToKV($self->fields);
+}
+
+=head3 addField
+
+ $response->addField($namespace, $key, $value, $signed);
+
+Adds an OpenID field to the response, possibly in an extension namespace.
+
+=head4 Arguments
+
+=over
+
+=item namespace
+
+The namespace to put the field in.  '' or undef will put the field in the
+root openid namespace.
+
+=item key
+
+=item value
+
+=item signed
+
+Whether this field should be signed.  Defaults to true if the response
+is to a C<checkid_setup> or C<checkid_immediate> request, and false 
+otherwise.
+
+=back
+
+=cut
+
+sub addField {
+    my $self = shift;
+    my $namespace = shift;
+    my $key = shift;
+    my $value = shift;
+    my $signed = shift;
+    $signed = ($self->request->mode eq 'checkid_setup' or $self->request->mode eq 'checkid_immediate') unless defined($signed);
+
+    $key = "$namespace.".$key if $namespace;
+    $self->{fields}->{$key} = $value;
+
+
+    if($signed) {
+        $self->{signed} = [] unless defined($self->{signed});
+        push @{$self->{signed}}, $key;
+    }
+
+}
+
+=head3 addFields
+
+ $response->addFields($namespace, \%fields, $signed);
+
+Much like C<addField>, but takes a hash reference containing a number
+key/value pairs.
+
+=cut
+
+sub addFields {
+    my $self = shift;
+    my $namespace = shift;
+    my $fields = shift;
+    my $signed = shift;
+
+    while (my ($key, $value) = each %$fields) {
+        $self->addField($namespace, $key, $value, $signed);
+    }
+}
+
+=head3 fields
+
+An accessor method for the fields hash ref.
+
+=cut
+
+sub fields {
+    my $self = shift;
+    return $self->{fields};
+}
+
+=head3 request
+
+Returns the request this response is responding to.
+
+=cut
+
+sub request {
+    my $self = shift;
+    return $self->{request};
+}
+
+
+package Net::OpenID::JanRain::Server::WebResponse;
+
+use strict;
+use warnings;
+
+=head1 Net::OpenID::JanRain::Server::WebResponse
+
+This object is meant to be easily encoded into an HTTP response in your
+application.
+
+=head2 Accessor Methods
+
+=over
+
+=item code
+
+The HTTP code to use on your response.
+
+=item headers
+
+A hash reference of headers to put on your response.
+
+=item body
+
+The body of the response.
+
+=back
+
+=cut
+
+sub new {
+    my ($caller, $code, $headers, $body) = @_; #XXX optionals
+
+    my $class = ref($caller) || $caller;
+
+    my $self = {
+        code    => $code,
+        headers => $headers,
+        body    => $body,
+        };
+
+    bless($self,$class);
+}
+
+sub code {
+    my $self = shift;
+    return $self->{code};
+}
+
+sub headers {
+    my $self = shift;
+    return $self->{headers};
+}
+
+sub body {
+    my $self = shift;
+    return $self->{body};
+}
+
+package Net::OpenID::JanRain::Server::ProtocolError;
+
+use strict;
+use warnings;
+use constant {
+    OPENID_PREFIX  =>  'openid.',
+};
+
+use Net::OpenID::JanRain::Util qw( appendArgs hashToKV );
+
+=head1 Net::OpenID::JanRain::Server::ProtocolError
+
+Objects of this class are returned by XXX when the consumer sends us an
+improper request.  It may be encoded to a web response in the same manner
+that a L</Net::OpenID::JanRain::Server::Response> object is encoded.
 
 =cut
 
 sub new {
     my $caller = shift;
-    my ($server_url, $args) = @_;
+    my $query = shift;
+    my $text = shift;
+    my $class = ref($caller) || $caller;
+
+    my $self = {query => $query};
+    if ($text) {
+        $self->{text} = $text;
+    }
+    else {
+        warn "Error without text";
+    }
+
+    bless($self, $class);
+}
+
+=head3 text
+
+Returns a string describing the error.
+
+=cut
+
+sub text {
+    my $self = shift;
+    return $self->{text};
+}
+
+=head3 query
+
+returns the query that led to the error.
+
+=cut
+
+sub query {
+    my $self = shift;
+    return $self->{query};
+}
+
+=head3 hasReturnTo
+
+Do we have a return_to URL to send the error back to the server?
+(only relevant when the c<whichEncoding> method returns 'url')
+
+=cut
+
+sub hasReturnTo {
+    my $self = shift;
+    return 1 if $self->{query}->{OPENID_PREFIX.'return_to'};
+    return 0;
+}
+
+=head3 encodeToURL
+
+Generates and returns a URL for redirecting the user to alert the consumer
+of the error.
+
+=cut
+
+sub encodeToURL {
+    my $self = shift;
+    my $return_to = $self->{query}->{OPENID_PREFIX.'return_to'};
+    
+    unless ($return_to) {
+        carp("OpenID ProtocolError has no return_to URL to encode onto");
+        return undef;
+    }
+
+    return appendArgs($return_to, {'openid.mode'  => "error", 
+                                   'openid.error' => $self->{text}});
+}
+
+=head3 encodeToKVForm
+
+Generates and returns a KV form string for returning in the body of the
+response to the consumer.
+
+=cut
+
+sub encodeToKVForm {
+    my $self = shift;
+
+    return hashToKV({mode=>'error', error=>$self->text});
+}
+
+=head3 fields
+
+Returns a hash ref of the response fields.
+
+=cut
+
+sub fields {
+    my $self = shift;
+    return {mode=>'error', error=>$self->text};
+}
+
+=head3 whichEncoding
+
+Returns a string, either 'url', or 'kvform', based on how the error
+should be encoded for transmission.
+
+=cut
+
+sub whichEncoding {
+    my $self = shift;
+    my $mode = $self->{query}->{OPENID_PREFIX.'mode'};
+    my $return_to = $self->{query}->{OPENID_PREFIX.'return_to'};
+
+    if(($mode eq 'checkid_setup' or $mode eq 'checkid_immediate') and
+        $self->hasReturnTo()) {
+        return 'url';
+    } else {
+        return 'kvform';
+    }
+}
+
+package Net::OpenID::JanRain::Server::Signatory;
+
+use strict;
+use warnings;
+use Carp;
+
+use Net::OpenID::JanRain::Util qw( toBase64 );
+use Net::OpenID::JanRain::CryptUtil qw( randomString );
+
+my $SECRET_LIFETIME = 14 * 24 * 60 * 60; # seconds in a fortnight
+
+# keys have a bogus server URL in them because the filestore
+# really does expect that key to be a URL.  This seems a little
+# silly for the server store, since I expect there to be only one
+# server URL.
+my $_normal_key = 'http://localhost/|normal';
+my $_dumb_key = 'http://localhost/|dumb';
+
+=head1 Net::OpenID::JanRain::Server::Signatory
+
+This object signs responses and checks signatures.  One is contained
+inside every  C<Net::OpenID::JanRain::Server> object.
+
+If you use the
+L</encodeResponse> method of the C<Net::OpenID::JanRain::Server> object,
+you won't have to know how this object works.  All the object state is
+in the OpenID store.
+
+=cut
+
+sub new {
+    my ($caller, $store) = @_;
 
     my $class = ref($caller) || $caller;
 
-    my $self = {
-      server_url => $server_url,
-      identity_url => $args->{'openid.identity'},
-      trust_root => ($args->{'openid.trust_root'} or $args->{'openid.return_to'}),
-      args => $args,
-    };
-
-    bless $self, $class;
-}
-
-=head3 retry
-
-This method calls L<"getOpenIDResponse"> to retry the authorization.  Provide the
-server object as the first argument, and an authorization checking function
-as the second argument.  This makes it easy to do a one-off authorization without
-forcing the user to permit future requests from the trust_root.  After the user
-is authenticated and permits the action once, simply use a function that returns
-a true value as the auth checking function for $auth_info->retry.
-
-This method returns a pair from L<"getOpenIDResponse">.
-
-=cut
-
-sub retry {
-    my $self = shift;
-    my ($openid_server, $is_authorized) = @_;
-    return $openid_server->getOpenIDResponse('GET', $self->{args}, $is_authorized);
-}
-
-=head3 cancel
-
-This method takes no arguments and returns a pair like that from 
-L<"getOpenIDResponse">, but it is always a redirect to the cancel URL.
-Use this when the user decides not to permit a transaction to continue.
-
-=cut
-
-sub cancel {
-    my $self = shift;
-    return REDIRECT, $self->cancelURL;
-}
-
-=head3 cancelURL
-
-This method returns a URL to send the user to in order to cancel the OpenID
-transaction.  Use this when the user decides not to permit a transaction to
-continue.
-
-=cut
-
-sub cancelURL {
-    my $self = shift;
-    return appendArgs($self->{args}->{'openid.return_to'}, 
-                        {'openid.mode' => 'cancel'});
-}
-
-=head3 retryURL
-
-This method returns the original URL from whence this object came.  (The
-arguments may be in different order, however.)  Use this to redirect the
-user back to your site after authentication and authorization of the
-transaction.
-
-=cut
-
-sub retryURL {
-    my $self = shift;
-    return appendArgs($self->{server_url}, $self->{args});
-}
-
-=head3 identityURL
-
-Returns the identity URL that is the subject of the OpenID transaction
-in question.
-
-=cut
-
-sub identityURL {
-    my $self = shift;
-    return $self->{identity_url};
-}
-
-=head3 trustRoot
-
-Returns the trust root of the transaction.  This is a URL schema; the return
-to URL must fit into this schema.  For more information see
-http://openid.net/specs.bml#mode-checkid_immediate
-
-=cut
-
-sub trustRoot {
-    my $self = shift;
-    return $self->{trust_root};
-}
-
-=head3 serialize
-
-This method returns a string that can be turned back into an AuthorizationInfo
-object with the deserialize class method.
-
-=cut
-
-sub serialize {
-    my $self = shift;
-    return join '|', ($self->{server_url}, urlencode(%{$self->{args}}));
-}
-
-=head3 deserialize
-
-This class method instantiates an AuthorizationInfo object based on a string
-which must be of the form generated by serialize.
-
-=cut
-
-sub deserialize {
-    my $caller = shift;
-    my ($aistr) = @_;
-    my ($server_url, $argstr) = split /\|/, $aistr;
-    my $args = decodeParams($argstr);
+    unless ($store->isa('Net::OpenID::JanRain::Stores')) {
+        carp "Need an instance of Net::OpenID::JanRain::Stores";
+        return undef;
+    }
     
+    my $self = {store => $store};
+    bless($self, $class);
+}
+
+=head3 verify
+
+ $is_valid = $signatory->verify($assoc_handle, $sig, $signed_pairs);
+
+=cut
+
+sub verify {
+    my ($self, $assoc_handle, $sig, $signed_pairs) = @_;
+
+    my $assoc = $self->getAssociation($assoc_handle, 1);
+    
+    return 0 unless ($assoc);
+    my $expected_sig = toBase64($assoc->signPairs($signed_pairs));
+
+    return $sig eq $expected_sig;
+}
+
+=head3 sign
+
+ $signatory->sign($response);
+
+=cut
+
+sub sign {
+    my ($self, $response) = @_;
+
+    my $assoc_handle = $response->request->assoc_handle;
+
+    my $assoc;
+    if ($assoc_handle) {
+        $assoc = $self->getAssociation($assoc_handle, 0);
+        unless ($assoc) {
+            # We don't have that association.  Send the invalidate handle
+            # message back, and fall back on dumb mode.
+            $response->addFields('',{invalidate_handle => $assoc_handle});
+            $assoc = $self->createAssociation(1);
+        }
+    }
+    else {
+        $assoc = $self->createAssociation(1);
+    }
+    $response->addFields('', {assoc_handle => $assoc->handle}, 0);
+    $assoc->addSignature($response->{fields}, $response->signed); 
+
+    return $response;
+}
+
+=head3 createAssociation
+
+ $assoc = $signatory->createAssociation($dumbp);
+
+=cut
+
+sub createAssociation {
+    my $self = shift;
+    my $dumb = shift;
+    
+    my $assoc_type = 'HMAC-SHA1';
+    my $secret = randomString(20);
+    my $uniq = toBase64(randomString(4));
+    my $now = time;
+    my $handle = "_${assoc_type}_${now}_${uniq}_";
+    
+    $handle = "_d$handle" if $dumb;
+    
+    my $assoc = Net::OpenID::JanRain::Association->fromExpiresIn(
+        $SECRET_LIFETIME, $handle, $secret, $assoc_type);
+
+    if ($dumb) {
+        $self->{store}->storeAssociation($_dumb_key, $assoc);
+    }
+    else {
+        $self->{store}->storeAssociation($_normal_key, $assoc);
+    }
+    return $assoc;
+}
+
+=head3 getAssociation
+
+$assoc = $signatory->getAssociation($assoc_handle, $dumb);
+
+=cut
+
+sub getAssociation {
+    my ($self, $assoc_handle, $dumb) = @_;
+    
+    unless (defined($assoc_handle)) {
+        carp("assoc_handle must be defined");
+        return undef;
+    }
+
+    my $key;
+    if ($dumb) {
+        $key = $_dumb_key;
+    }
+    else {
+        $key = $_normal_key;
+    }
+    my $store = $self->{store};
+    my $assoc = $store->getAssociation($key, $assoc_handle);
+    if (defined($assoc) and $assoc->expiresIn == 0) {
+        # oid_log("requested association $assoc_handle is expired");
+        $store->removeAssociation($key, $assoc_handle);
+        return undef;
+    }
+    return $assoc;
+}
+
+=head3 invalidate
+
+ $signatory->invalidate($assoc_handle, $dumb);
+
+=cut
+
+sub invalidate {
+    my ($self, $assoc_handle, $dumb) = @_;
+
+    if ($dumb) {
+        $self->{store}->removeAssociation($_dumb_key, $assoc_handle);
+    }
+    else {
+        $self->{store}->removeAssociation($_normal_key, $assoc_handle);
+    }
+}
+
+package Net::OpenID::JanRain::Server;
+
+use strict;
+use warnings;
+use Net::OpenID::JanRain::Util qw( appendArgs hashToKV );
+use Carp;
+
+use constant {
+    OPENID_PREFIX  =>  'openid.',
+};
+
+my $signatoryClass='Net::OpenID::JanRain::Server::Signatory';
+my $webResponseClass='Net::OpenID::JanRain::Server::WebResponse';
+
+=head1 Net::OpenID::JanRain::Server
+
+This object handles requests for an OpenID server.
+
+Queries in hash-ref form may be turned into
+L</Net::OpenID::JanRain::Server::Request> objects with the
+L</decodeRequest> method.
+
+Requests which are not C<checkid> requests may be passed to the
+L<handleRequest> method, and a response will be returned.
+
+L</Net::OpenID::JanRain::Server::Response> objects may be transformed
+into L</Net::OpenID::JanRain::Server::WebResponse> objects with the
+L<endodeResponse> method, which will also sign the responses if necessary.
+
+=head2 Methods
+
+=head3 new
+
+ $server = new Net::OpenID::JanRain::Server($store);
+
+Instantiate this object with an instance of C<Net::OpenID::JanRain::Stores>.
+
+=cut
+
+sub new {
+    my ($caller, $store) = @_;
     my $class = ref($caller) || $caller;
 
+    my $signatory = $signatoryClass->new($store);
+    unless (defined($signatory)) {
+        carp "Failed to instantiate signatory";
+        return undef;
+    }
+    
     my $self = {
-      server_url => $server_url,
-      identity_url => $args->{'openid.identity'},
-      trust_root => ($args->{'openid.trust_root'} or $args->{'openid.return_to'}),
-      args => $args,
+###        store     => $store,
+        signatory => $signatory
     };
 
-    $self->{cancel_url} = appendArgs(
-        $args->{'openid.return_to'}, {'openid.mode' => 'cancel'});
-
-    bless $self, $class;
+    bless($self, $class);
 }
-    
 
-1;
+=head3 handleRequest
+
+Call this method on a L</Net::OpenID::JanRain::Server::Request> object
+that is not a L</Net::OpenID::JanRain::Server::CheckIDRequest> and 
+the appropriate L</Net::OpenID::JanRain::Server::Response> object will
+be returned.
+
+=cut
+
+sub handleRequest {
+    my ($self, $request) = @_;
+
+    my $mode = $request->mode;
+    if ($mode eq 'check_authentication') {
+        return $self->openid_check_authentication($request);
+    }
+    elsif ($mode eq 'associate') {
+        return $self->openid_associate($request);
+    }
+    else {
+        warn "No handler for mode $mode";
+        return undef;
+    }
+}
+
+=head3 signatory
+
+An accessor method to get the signatory object used by the server.
+
+=cut
+
+sub signatory {
+    my $self = shift;
+    return $self->{signatory};
+}
+
+sub openid_check_authentication {
+    my ($self, $request) = @_;
+    return $request->answer($self->{signatory});
+}
+
+sub openid_associate {
+    my ($self, $request) = @_;
+    my $signatory = $self->{signatory};
+    my $assoc = $signatory->createAssociation(0);
+    return $request->answer($assoc);
+}
+
+=head3 decodeRequest
+
+ $response = $server->decodeRequest(\%query);
+
+This method takes a hash ref of an OpenID query and returns an
+L</Net::OpenID::JanRain::Server::Request> object.
+
+=cut
+
+sub decodeRequest {
+    my ($self, $query) = @_;
+    
+    return undef unless %$query;
+
+    my $oidp = 'openid.';
+    $oidp =~ s/\./\\./; # escape the dang .
+    my $myquery = {};
+    while(my ($k, $v) = each %$query) {
+        $myquery->{$k} = $v if $k =~ /^$oidp/;
+    }
+    return undef unless %$myquery;
+
+    my $mode = $myquery->{OPENID_PREFIX.'mode'};
+
+    return $errorClass->new($query, "Query is missing mode") unless $mode;
+
+    if($mode eq 'checkid_setup' or $mode eq 'checkid_immediate') {
+        return Net::OpenID::JanRain::Server::CheckIDRequest->fromQuery($query);
+    }
+    elsif($mode eq 'check_authentication') {
+        return Net::OpenID::JanRain::Server::CheckAuthRequest->fromQuery($query);
+    }
+    elsif($mode eq 'associate') {
+        return Net::OpenID::JanRain::Server::AssociateRequest->fromQuery($query);
+    }
+    else {
+        return $errorClass->new($query, "Unknown mode $mode");
+    }
+}
+
+=head3 encodeResponse
+
+ $web_response = $server->encodeResponse($response);
+
+This method takes a L</Net::OpenID::JanRain::Server::Response> object
+and returns the appropriate L</Net::OpenID::JanRain::Server::WebResponse>
+object.
+
+=cut
+
+sub encodeResponse {
+    my ($self, $response) = @_;
+    
+    my $encode_as = $response->whichEncoding();
+
+    if ($encode_as eq 'kvform') {
+        my $wr = $webResponseClass->new(200, {}, $response->encodeToKVForm);
+    }
+    elsif($encode_as eq 'url') {
+
+        if ($response->signed) {
+            unless ($response->fields->{sig}) {
+                my $signatory = $self->{signatory};
+                $signatory->sign($response);
+            }
+        }
+        my $wr = $webResponseClass->new(302, 
+            {Location => $response->encodeToURL}, undef);
+    }
+}
+
+

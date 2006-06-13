@@ -1,12 +1,13 @@
 package Net::OpenID::JanRain::Util;
 
-$VERSION = "0.9.6"
+$VERSION = "1.1.0";
 
 use warnings;
 use strict;
 
 use Carp;
 use CGI qw(-oldstyle_urls);
+use URI;
 
 use MIME::Base64 qw(encode_base64);
 
@@ -25,6 +26,8 @@ our @EXPORT_OK = qw(
     hashToPairs
     hashToKV
     findAgent
+    normalizeUrl
+    checkTrustRoot
     );
 
 sub log { #currently most places just use warn
@@ -48,6 +51,7 @@ sub decodeParams {   # turns a query string into a hash
 ########################################################################
 sub appendArgs {
     my ($url, $args) = @_;
+    carp "appendArgs called with improper args: url($url) args($args)" unless ($url && $args);
     if($args) {
         UNIVERSAL::isa($args, 'HASH') or
             croak "second arg to appendArgs must be hash ref";
@@ -69,6 +73,7 @@ sub toBase64 {
 ########################################################################
 sub fromBase64 {
     my ($s) = @_;
+    carp "fromBase64 called on nothing" unless defined $s;
     return(MIME::Base64::decode_base64($s));
 } # end fromBase64
 ########################################################################
@@ -102,13 +107,15 @@ sub pairsToKV { # Put a list of pairs into KVform
 # the third argument is a prefix to prepend to the keys when doing
 # hash lookup.
 sub hashToPairs { 
-    my ($hash, $keys, $prefix) = @_;
-   
+    my $hash = shift;
+    my $keys = shift;
+    my $prefix = shift || '';
+    
     my @pairs = ();
     foreach my $key (@$keys) {
         my $realkey = $prefix . $key;
         my @pair = ($key, $hash->{$realkey});
-        print "No value associated with $realkey\n" unless $hash->{$realkey};
+        return undef unless $hash->{$realkey};
         push @pairs, \@pair;
     }
     return \@pairs;
@@ -119,7 +126,10 @@ sub hashToKV {
     return pairsToKV(hashToPairs($hashref, [keys(%$hashref)], ''));
 }
 ########################################################################
-our $AGENT; #Save what we found for later
+our $AGENT; # Save what we found for later
+sub setAgent { # Mainly for testing
+    $AGENT = shift;
+}
 sub findAgent {
     $AGENT and return($AGENT);
     # try to find LWPx::ParanoidAgent
@@ -148,10 +158,52 @@ sub findAgent {
         return();
     };
     $AGENT = $chooser->(@agents);
-    $AGENT or die "No HTTP User agent found"; # Does dumb mode need an agent?
+    $AGENT or die "No HTTP User agent found";
     return $AGENT;
 }
 
+sub normalizeUrl {
+    my $url = shift;
+    unless ($url) {
+        carp "normalizeUrl falsely called";
+        return undef;
+    }
+    $url = "http://$url" unless($url =~ m#^\w+://#);
+    return(URI->new($url)->canonical);
+} # end normalizeUrl
 
+=head3 checkTrustRoot
 
+ $is_return_to_valid_against_trust_root = checkTrustRoot($trust_root, $return_to);
+
+=cut
+
+sub checkTrustRoot {
+    my ($trust_root, $return_to) = @_;
+
+    my $rt = URI->new($return_to);
+    my $tr = URI->new($trust_root);
+    
+    return 0, "return_to URL invalid against trust_root: scheme"
+        unless $rt->scheme eq $tr->scheme;
+
+    # Check the host
+    my $trh = $tr->host;
+    if($trh =~ s/^\*\.//) { # wildcard trust root
+        return 0, "return_to URL invalid against trust_root: wchost"
+            unless ($rt->host =~ /\w*\.?$trh/ and $rt->port == $tr->port);
+    }
+    else { # no wildcard
+        return 0, "return_to URL invalid against trust_root: host"
+            unless $tr->host_port eq $rt->host_port;
+    }
+    
+    # Check the path and query
+    my $trp = $tr->path_query;
+    return 0, "return_to URL invalid against trust_root: path"
+        unless $rt->path_query =~ /^$trp/;
+
+    # success
+    return 1, "return_to URL valid against trust_root";
+}
 1;

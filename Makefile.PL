@@ -8,6 +8,7 @@ WriteMakefile(
     AUTHOR                  => 'Dag Arneson <dag@janrain.com>',
     ABSTRACT                => 'OpenID Server and Consumer with JanRain API',
     PREREQ_PM               => {
+        'Net::Yadis' => 0,
         'Digest::HMAC_SHA1'  => 0,
         'MIME::Base64'  => 0,
         'LWP::UserAgent'  => 0,

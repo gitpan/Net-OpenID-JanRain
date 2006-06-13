@@ -75,9 +75,9 @@ sub _ensureDir {
 # Call with the directory where the files should go.
 # All files must reside on the same filesystem.
 sub new {
-	my $caller = shift;
-	my ($dir) = @_;
-	my $class = ref($caller) || $caller;
+    my $caller = shift;
+    my ($dir) = @_;
+    my $class = ref($caller) || $caller;
     $dir = File::Spec->rel2abs($dir);
     my $noncedir = File::Spec->catdir($dir, "nonces");
     my $assocdir = File::Spec->catdir($dir, "associations");
@@ -97,7 +97,7 @@ sub new {
     _ensureDir($assocdir);
     _ensureDir($tempdir);
 
-	bless($self, $class);
+    bless($self, $class);
 } # end new
 ########################################################################
 # isDumb
@@ -294,7 +294,7 @@ sub storeNonce {
 	my $self = shift;
 	my ($nonce) = @_;
     my $fn = File::Spec->catfile($self->{nonce_dir}, $nonce);
-    open FILE, "> $fn" or die "Could not open nonce file $fn";
+    open FILE, "> $fn" or die "Could not open nonce file $fn - $!\n";
     close FILE;
 } # end storeNonce
 ########################################################################

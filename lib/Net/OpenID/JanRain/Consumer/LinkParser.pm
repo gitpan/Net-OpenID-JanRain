@@ -3,7 +3,7 @@ package Net::OpenID::JanRain::Consumer::LinkParser;
 use strict;
 use Exporter;
 our @ISA = qw(Exporter);
-our @EXPORT_OK = qw(parseLinkAttrs);
+our @EXPORT_OK = qw(parseLinkAttrs parseOpenIDLinkRel);
 
 my $htmlre = qr{
 # Starts with the tag name at a word boundary, where the tag name is
@@ -137,4 +137,20 @@ sub parseLinkAttrs {
     return @linkhashes;
 }
 
+sub parseOpenIDLinkRel {
+    my $html = shift;
+    
+    my @linkhashes = parseLinkAttrs($html);
 
+    my ($server, $delegate);
+    for my $link (@linkhashes) {
+        if (lc($link->{rel}) eq 'openid.server') {
+            my %foo = %$link;
+            $server = $link->{href};
+        }
+        if (lc($link->{rel}) eq 'openid.delegate') {
+            $delegate = $link->{href};
+        }
+    }
+    return ($delegate, $server);
+}
