@@ -1,13 +1,15 @@
 #!/usr/bin/perl
+
+use Test::Simple qw(no_plan);
+
 use Net::OpenID::JanRain::Consumer::LinkParser qw(parseLinkAttrs);
 use strict;
 
 my @failures = ();
-my $numtests = 0;
 
-my $fn = $ARGV[0] or "linkparse.txt";
+my $fn = $ARGV[0] || "linkparse.txt";
 my $fh;
-open $fh, "< $fn" or open $fh, "< t/$fn" or die;
+open $fh, "< $fn" or open $fh, "< t/$fn" or open $fh, "< ../t/$fn" or die "couldn't open $fn";
 my ($bytes, $data);
 my $offset = 0;
 do {
@@ -22,8 +24,7 @@ my @cases = split /\n\n\n/, $data;
 
 my $comment = shift @cases;
 
-# examine num_tests
-
+my $ncases = @cases;
 
 TEST: for my $test (@cases) {
     my ($testname, @expected);
@@ -53,9 +54,9 @@ TEST: for my $test (@cases) {
             push @expected, \%link;
         }
     }
-    
     my @actual = parseLinkAttrs($body);
-
+    my $f = @expected;
+    my $b = @actual;
     my $i = 0;
     # Check that @actual is a subset of @expected (including optional)
     # they must also be in the correct order.
@@ -66,8 +67,10 @@ TEST: for my $test (@cases) {
                  or $link->{$_} eq $expected[$i]->{"$_*"}) {
                 if ($expected[$i]->{_optional_} and $i < $#expected) {
                     $i++;
+                    ok(1);
                     redo;
                 } else {
+                    ok(0);
                     push @failures, [$testname, 
                         \@expected, \@actual, $test];
                     next TEST;
@@ -78,15 +81,17 @@ TEST: for my $test (@cases) {
     }
     # check that @expected not optional is a subset of @actual
     $i = 0;
-    for $link (@expected) {
+    LINK: for $link (@expected) {
         next if $link->{_optional_};
         for (keys(%$link)) {
-            unless ($link->{$_} eq $actual[$i]->{$_}
-                 or $link->{$_} eq $actual[$i]->{"$_*"}) {
+            next LINK if /\*^/;
+            unless ($link->{$_} eq $actual[$i]->{$_}) {
                 if ($i < $#actual) {
                     $i++;
+                    ok(1);
                     redo;
                 } else {
+                    ok(0);
                     push @failures, [$testname, 
                         \@expected, \@actual, $test];
                     next TEST;

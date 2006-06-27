@@ -1,5 +1,7 @@
 #!/usr/bin/perl 
 
+use Test::More tests => 408;
+
 use Net::OpenID::JanRain::Association;
 use Net::OpenID::JanRain::CryptUtil qw( randomString );
 
@@ -44,17 +46,15 @@ sub checkRetrieve {
     my $retrieved_assoc = $store->getAssociation($url, $handle);
     
     if ((not defined($expected)) or $store->isDumb()) {
-        $retrieved_assoc and die;
+        is($retrieved_assoc, undef, "No assoc when not expected");
     }
     else {
-        $retrieved_assoc or die;
-        $expected or die;
-        $retrieved_assoc->equals($expected) or die;
-        die "Retrieved a reference to the expected "
-                ."value instead of a new object\n"
-                if ($retrieved_assoc eq $expected);
-        $retrieved_assoc->{handle} eq $expected->{handle} or die;
-        $retrieved_assoc->{secret} eq $expected->{secret} or die;
+        isa_ok($retrieved_assoc, "Net::OpenID::JanRain::Association",
+                    "association from store");
+        ok($retrieved_assoc->equals($expected), "retrieved association is same as expected assoc");
+        isnt($retrieved_assoc, $expected, "the two assocs are not the same object");
+        is($retrieved_assoc->{handle}, $expected->{handle}, "second guess equals method (handle)");
+        is($retrieved_assoc->{secret}, $expected->{secret}, "second guess equals method (secret)");
     }
 }
 
@@ -62,15 +62,16 @@ sub checkRemove {
     my($store, $url, $handle, $expected) = @_;
     my $present = $store->removeAssociation($url, $handle);
     my $expectedPresent = (not $store->isDumb() and $expected);
-    ((not $expectedPresent and not $present)
-        or ($expectedPresent and $present)) or die;
+    # use not to ensure their truth values are used and not their values
+    is((not $present), (not $expectedPresent), "assoc removal check");
 }
 
 sub testUseNonce {
     my($store, $nonce, $expected) = @_;
     #my $expected = $store->isDumb() if $store->isDumb();
     my $actual = $store->useNonce($nonce);
-    (($actual and $expected) or (not $actual and not $expected)) ||die;
+    # use not to ensure their truth values are used and not their values
+    is((not $actual), (not $expected), "Nonce use check");
 }
     
 sub testStore {
@@ -197,7 +198,7 @@ sub testStore {
 
     # The second time around should return the same as last time.
     my $key2 = $store->getAuthKey();
-    $key eq $key2 || die;
+    is($key, $key2, "AuthKey remains the same");
     length($key) == $store->{AUTH_KEY_LEN};
 
 }
@@ -271,7 +272,7 @@ sub test_postgresqlstore {
 
     testStore($store);
     $dbh->disconnect;
-    my $dbh = DBI->connect("dbi:Pg:dbname=template1;host=$db_host",
+    $dbh = DBI->connect("dbi:Pg:dbname=template1;host=$db_host",
                             $username, $password);
     $dbh->do("DROP DATABASE $db_name");
 }

@@ -16,11 +16,9 @@ lib/Net/OpenID/JanRain/Consumer/LinkParser.pm
 lib/Net/OpenID/JanRain/Server.pm
 t/cryptutil.t
 t/linkparse.t
-t/parsekv.t
 t/stores.t
 t/server.t
 t/linkparse.txt
-t/runtests
 t/association.t
 t/consumer.t
 MANIFEST

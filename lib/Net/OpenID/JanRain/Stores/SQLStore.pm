@@ -152,7 +152,7 @@ sub getAssociation {
         #get the stuff
         while( my @row = $sth->fetchrow_array) {
             my $assoc = Net::OpenID::JanRain::Association->new(@row);
-            if ($assoc->getExpiresIn == 0) {
+            if ($assoc->expiresIn == 0) {
                 $self->_execSQL('remove_assoc_sql', 
                                 $server_url,
                                 $assoc->{handle});

@@ -1,4 +1,6 @@
 #!/usr/bin/perl
+
+use Test::More tests => 1;
 use Net::OpenID::JanRain::Association;
 
 my @assoc_keys = (
@@ -16,13 +18,6 @@ $assoc = Net::OpenID::JanRain::Association->new(
         'handle', 'secret', $issued, $lifetime, 'HMAC-SHA1');
 $s = $assoc->serialize();
 $assoc2 = Net::OpenID::JanRain::Association->deserialize($s);
-for $k (@assoc_keys) {
-    $v1 = $assoc->{$k};
-    $v2 = $assoc2->{$k};
-    print "$k : $v1 : $v2\n";
-}
 
-exit(0) if $assoc->equals($assoc2);
-
-die "Association serialization/deserialization test failed"
+ok($assoc->equals($assoc2));
 

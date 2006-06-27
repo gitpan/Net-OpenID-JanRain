@@ -938,7 +938,7 @@ Do we have a return_to URL to send the error back to the server?
 
 sub hasReturnTo {
     my $self = shift;
-    return 1 if $self->{query}->{OPENID_PREFIX.'return_to'};
+    $self->{query} and return 1 if $self->{query}->{OPENID_PREFIX.'return_to'};
     return 0;
 }
 
@@ -995,6 +995,9 @@ should be encoded for transmission.
 
 sub whichEncoding {
     my $self = shift;
+
+    return undef unless $self->{query};
+
     my $mode = $self->{query}->{OPENID_PREFIX.'mode'};
     my $return_to = $self->{query}->{OPENID_PREFIX.'return_to'};
 

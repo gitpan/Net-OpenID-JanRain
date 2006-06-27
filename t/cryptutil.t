@@ -1,5 +1,6 @@
 #!/usr/bin/perl 
 
+use Test::More tests => 105;
 use Net::OpenID::JanRain::CryptUtil qw( hmacSha1
                                 sha1
                                 numToBase64
@@ -11,7 +12,7 @@ use Net::OpenID::JanRain::CryptUtil qw( hmacSha1
 use bignum;
 
 sub testNumConvert {
-    for $i (1..256) {
+    for $i (1..50) {
         $str1 = randomString($i);
         # twos complement rep ... first byte is null only if second byte
         # high bit is set
@@ -19,14 +20,9 @@ sub testNumConvert {
         $str1 = "\x00".$str1 if (ord($str1) > 127);
         $bignuma = bytesToNum($str1);
         $str2 = numToBytes($bignuma);
-        if($str1 ne $str2) {
-            $hex1 = charToHex($str1);
-            $hex2 = charToHex($str2);
-            print "These appear not to be equal:\n$hex1\n$hex2\n";
-            die "bytesToNum(numToBytes(str)) != str";
-        }
+        is($str1, $str2, "numToBytes(bytesToNum(s_$i)) == s_$i");
         $bignumb = bytesToNum($str2);
-        die "numToBytes(bytesToNum(n)) != n" if (Math::BigInt::bcmp($bignuma, $bignumb));
+        is(Math::BigInt::bcmp($bignuma, $bignumb), 0, "bytesToNum(numToBytes(n_$i)) == n_$i");
     }
 }
 
@@ -127,14 +123,11 @@ digest =>        hexToChar('4c1a03424b55e07fe7f27be1d58bb9324a9a5a04'),
 );
 
 sub testHmacSha1 {
+    my $i = 1;
     foreach (@test_cases) {
         %t = %$_;
-        unless (hmacSha1($t{key}, $t{data}) eq $t{digest}) {
-            $expstr = charToHex($t{digest});
-            $gotstr = charToHex(hmacSha1($t{key}, $t{data}));
-            print "Expected: $expstr\n     Got: $gotstr\n";
-            die "HMAC-SHA-1 test $t{number} failed\n";
-        }
+        is(hmacSha1($t{key}, $t{data}), $t{digest}, "HMAC-SHA1 test $i");
+        $i++;
     }
 }
 

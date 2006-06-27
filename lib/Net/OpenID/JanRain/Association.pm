@@ -64,14 +64,14 @@ sub new {
 	bless($self, $class);
 } # end new
 ########################################################################
-# getExpiresIn
+# expiresIn
 # if we are expired return 0, otherwise the number of seconds we have left
 sub expiresIn {
 	my $self = shift;
     my $timeleft = $self->{issued} + $self->{lifetime} - time;
     return 0 if $timeleft < 0;
     return $timeleft;
-} # end getExpiresIn
+} # end expiresIn
 ########################################################################
 # equals
 # Check to see if we are the same association as another object
